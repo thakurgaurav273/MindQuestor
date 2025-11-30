@@ -50,13 +50,34 @@ const QuizePage = () => {
     const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
     const startTimeRef = useRef<number>(Date.now());
     const socketRef = useRef<Socket | null>(null);
-    
+
     // Get data from location state
     const { category, quizId, isMultiplayer } = (location.state || {}) as {
         category?: string;
         quizId?: string;
         isMultiplayer?: boolean;
     };
+
+    const handleBeforeUnload = (e: any) => {
+        e.preventDefault();
+        e.returnValue = "";
+        socket.emit("quiz:exit", { userId: user.userId, quizId: quizId });
+    };
+
+    const handlePopState = () => {
+        // Optionally send websocket event here before preventing back navigation
+        socket.emit("quiz:exit", { userId: user.userId, quizId: quizId });
+        window.history.pushState(null, "", window.location.href);
+    };
+    useEffect(() => {
+        window.addEventListener("beforeunload", handleBeforeUnload);
+        window.history.pushState(null, "", window.location.href);
+        window.addEventListener("popstate", handlePopState);
+        return () => {
+            window.removeEventListener("beforeunload", handleBeforeUnload);
+            window.removeEventListener("popstate", handlePopState);
+        };
+    }, []);
 
     // Fetch quiz data
     useEffect(() => {
@@ -99,13 +120,13 @@ const QuizePage = () => {
     useEffect(() => {
         if (!socketRef.current) return;
 
-        const handleAnswerResult = (data: { 
-            questionId: string; 
+        const handleAnswerResult = (data: {
+            questionId: string;
             isCorrect: boolean;
             correctAnswer: string;
         }) => {
             console.log('Answer validation received:', data);
-            
+
             if (data.questionId === currentQuestion?._id) {
                 setIsCorrect(data.isCorrect);
                 setCorrectAnswer(data.correctAnswer);
@@ -113,7 +134,7 @@ const QuizePage = () => {
                 // Record answer after receiving validation
                 if (selectedAnswer) {
                     const timeSpent = Math.floor((Date.now() - startTimeRef.current) / 1000);
-                    
+
                     setUserAnswers(prev => [...prev, {
                         id: currentQuestion._id,
                         question: currentQuestion.questionText,
@@ -165,7 +186,7 @@ const QuizePage = () => {
     const handleTimeOut = () => {
         if (!answered && currentQuestion) {
             const timeSpent = Math.floor((Date.now() - startTimeRef.current) / 1000);
-            
+
             // Send timeout to server to get correct answer
             socket.emit('quiz:timeout', {
                 quizId: quizId,
@@ -175,7 +196,7 @@ const QuizePage = () => {
             });
 
             setAnswered(true);
-            
+
             // We'll get the correct answer from server, but record "No answer" for now
             setUserAnswers(prev => [...prev, {
                 id: currentQuestion._id,
@@ -309,11 +330,10 @@ const QuizePage = () => {
                     </div>
 
                     <div className="flex items-center gap-6">
-                        <div className={`flex items-center gap-2 px-4 py-2 rounded-lg font-semibold ${
-                            timeLeft <= 3
-                                ? 'bg-red-100 text-red-700'
-                                : 'bg-blue-100 text-blue-700'
-                        }`}>
+                        <div className={`flex items-center gap-2 px-4 py-2 rounded-lg font-semibold ${timeLeft <= 3
+                            ? 'bg-red-100 text-red-700'
+                            : 'bg-blue-100 text-blue-700'
+                            }`}>
                             <Clock className="w-5 h-5" />
                             <span>{timeLeft}s</span>
                         </div>
@@ -338,8 +358,8 @@ const QuizePage = () => {
                 </div>
             </nav>
 
-            <main className="flex-1 overflow-y-auto py-8 px-4">
-                <div className="max-w-2xl mx-auto">
+            <main className="flex-1 overflow-y-auto py-8 px-4 flex gap-3">
+                <div className="max-w-2xl">
                     <div className="bg-white rounded-xl shadow-sm p-8 mb-8">
                         <div className="flex items-start justify-between gap-4 mb-6">
                             <h2 className="text-2xl font-bold text-gray-900 leading-relaxed flex-1">
@@ -349,11 +369,10 @@ const QuizePage = () => {
                                 <button
                                     onClick={() => !answered && setIsHintVisible(!isHintVisible)}
                                     disabled={answered}
-                                    className={`flex-shrink-0 p-2 rounded-lg transition ${
-                                        isHintVisible
-                                            ? 'bg-yellow-100 text-yellow-600'
-                                            : 'hover:bg-gray-100 text-gray-600'
-                                    } ${answered ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`}
+                                    className={`flex-shrink-0 p-2 rounded-lg transition ${isHintVisible
+                                        ? 'bg-yellow-100 text-yellow-600'
+                                        : 'hover:bg-gray-100 text-gray-600'
+                                        } ${answered ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`}
                                     title="Show Hint"
                                 >
                                     <Lightbulb className="w-6 h-6" />
@@ -400,11 +419,9 @@ const QuizePage = () => {
                                     key={index}
                                     onClick={() => handleAnswerClick(option)}
                                     disabled={answered}
-                                    className={`w-full text-left p-4 rounded-lg border-2 transition-all duration-200 ${
-                                        answered ? 'cursor-not-allowed' : 'cursor-pointer hover:border-blue-300'
-                                    } ${bgColor} ${borderColor} ${textColor} ${
-                                        !answered && !isSelected ? 'hover:bg-gray-50' : ''
-                                    }`}
+                                    className={`w-full text-left p-4 rounded-lg border-2 transition-all duration-200 ${answered ? 'cursor-not-allowed' : 'cursor-pointer hover:border-blue-300'
+                                        } ${bgColor} ${borderColor} ${textColor} ${!answered && !isSelected ? 'hover:bg-gray-50' : ''
+                                        }`}
                                 >
                                     <div className="flex items-center justify-between">
                                         <span className="font-semibold">{option}</span>
@@ -469,6 +486,9 @@ const QuizePage = () => {
                             </button>
                         </div>
                     )}
+                </div>
+                <div className="h-[300px] w-[200px]">
+                    Chat with your opponent
                 </div>
             </main>
         </div>

@@ -12,6 +12,8 @@ import QuizJoinPage from './pages/QuizJoinPage';
 import { authService } from './shared/services/auth.service';
 import QuizePage from './pages/QuizePage';
 import ResultsPage from './pages/ResultsPage';
+import QuizHistoryPage from './pages/QuizHistoryPage';
+import QuizDetailsPage from './pages/QuizDetailsPage';
 
 // Global socket instance
 let globalSocket: Socket;
@@ -96,6 +98,8 @@ function App() {
           <Route path="/quiz" element={<QuizePage />} />
           <Route path="/results" element={<ResultsPage />} />
           <Route path="/dashboard" element={<div>Dashboard</div>} />
+          <Route path="/quiz-history" element={<QuizHistoryPage />} />
+          <Route path="/quiz-details/:quizId" element={<QuizDetailsPage />} />
           <Route path="*" element={<NotFound />} />
         </>
       );

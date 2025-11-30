@@ -1,14 +1,15 @@
 
 import { useNavigate } from 'react-router-dom';
-import { Brain } from 'lucide-react';
+import { Brain, User } from 'lucide-react';
 import { useUserStore } from '../store/userStore';
 import { authService } from '../shared/services/auth.service';
+import { useState } from 'react';
 
 const Navbar = ({ onNavClick }: { onNavClick: any }) => {
   const navigate = useNavigate();
   const user = useUserStore((state) => state.user);
+  const [showDropDown, setShowDropDown] = useState<boolean>(false);
 
-  console.log('Navbar user:', user);
   return (
     <nav className="w-full bg-white border-b border-gray-200">
       <div className="max-w-7xl mx-auto px-6 py-4 flex items-center justify-between">
@@ -30,7 +31,7 @@ const Navbar = ({ onNavClick }: { onNavClick: any }) => {
             Sign Up
           </button>
         </div>}
-        {user && <div className="flex gap-3">
+        {user && <div className="flex gap-3 relative">
           <button
             onClick={() => {
               authService.logout();
@@ -41,6 +42,16 @@ const Navbar = ({ onNavClick }: { onNavClick: any }) => {
           >
             Logout
           </button>
+          <button onClick={()=>{
+            setShowDropDown(!showDropDown);
+          }} className='bg-[whitesmoke] p-2 rounded-xl'>
+            <User/>
+          </button>
+          {showDropDown && <div className='absolute bottom-[-50px] right-2 bg-[whitesmoke] rounded-md'>
+            <li className='list-none p-2' onClick={()=>{
+              navigate("quiz-history")
+            }}>Quiz History</li>
+          </div>}
         </div>}
       </div>
     </nav>

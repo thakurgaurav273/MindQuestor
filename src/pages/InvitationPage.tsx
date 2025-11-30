@@ -25,7 +25,7 @@ const InvitationPage = () => {
     const [step, setStep] = useState<'main' | 'create' | 'invite' | 'join'>('main');
     const [numQuestions, setNumQuestions] = useState(20);
     const [quiz, setQuiz] = useState<Quiz | null>(null);
-    const [participants, setParticipants] = useState<Participant[]>([]);
+    const [participants, setParticipants] = useState<Participant[]>([user.userId]);
     const [copied, setCopied] = useState(false);
     const [loading, setLoading] = useState(false);
     const socketRef = useRef<Socket | null>(null);
@@ -165,6 +165,7 @@ const InvitationPage = () => {
                     count: numQuestions,
                     inviteCode: quizId,
                     sessionStatus: 'WAITING',
+                    participants: participants,
                     createdBy: hostId,
                 }),
             });
@@ -247,7 +248,6 @@ const InvitationPage = () => {
         <div className="min-h-screen bg-gray-50 py-12 px-4">
 
             <div className="max-w-4xl mx-auto">
-                {/* Header */}
                 {step === 'join' && <JoinViaLink />}
 
                 {step !== 'join' && <div className="text-center mb-12">
@@ -255,7 +255,6 @@ const InvitationPage = () => {
                     <p className="text-lg text-gray-600">Create a quiz and invite friends to compete with you</p>
                 </div>}
 
-                {/* Main Step - Choose Action */}
                 {step === 'main' && (
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                         {/* Create Quiz Card */}
