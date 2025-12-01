@@ -4,6 +4,8 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { User, Lightbulb, Clock, CheckCircle, XCircle, SkipForward, Loader, AlertCircle } from "lucide-react";
 import { getSocket } from "../App";
 import type { Socket } from "socket.io-client";
+import MessageList from "../components/MessageList";
+import MessageComposer from "../components/MessageComposer";
 
 interface Question {
     _id: string
@@ -19,6 +21,14 @@ interface QuizData {
     questions: Question[];
     sessionStatus: string;
     createdBy: string;
+}
+
+interface Message {
+    text: string;
+    timeStamp: number;
+    isUser?: boolean;
+    username?: string;
+    senderId?: string;
 }
 
 const QuizePage = () => {
@@ -37,7 +47,7 @@ const QuizePage = () => {
     const [error, setError] = useState<string | null>(null);
     const [isCorrect, setIsCorrect] = useState<boolean | null>(null);
     const [correctAnswer, setCorrectAnswer] = useState<string | null>(null);
-    const socket = getSocket();
+    const [messages, setMessages] = useState<Message[]>([]);
     const [userAnswers, setUserAnswers] = useState<Array<{
         id: string;
         question: string;
@@ -51,6 +61,10 @@ const QuizePage = () => {
     const startTimeRef = useRef<number>(Date.now());
     const socketRef = useRef<Socket | null>(null);
 
+
+    const currentQuestion = quizData?.questions[currentQuestionIndex];
+    const totalQuestions = quizData?.questions.length || 0;
+
     // Get data from location state
     const { category, quizId, isMultiplayer } = (location.state || {}) as {
         category?: string;
@@ -58,17 +72,44 @@ const QuizePage = () => {
         isMultiplayer?: boolean;
     };
 
+    const addMessage = (text: string) => {
+        const newMessage: Message = {
+            text,
+            timeStamp: Date.now(),
+            isUser: true,
+            username: user?.username || user?.name || 'You',
+            senderId: user.userId
+        };
+        // Optimistically add user's message to the chat
+        setMessages((prev) => [...prev, newMessage]);
+
+        // Send message via socket
+        if (socketRef.current && quizData?.inviteCode) {
+            socketRef.current.emit("message:sent", {
+                quizId: quizData.inviteCode,
+                senderId: user.userId,
+                username: user.username || user.name || 'You',
+                text: text,
+                messageType: 'chat'
+            });
+        }
+    };
+
     const handleBeforeUnload = (e: any) => {
         e.preventDefault();
         e.returnValue = "";
-        socket.emit("quiz:exit", { userId: user.userId, quizId: quizId });
+        if (socketRef.current) {
+            socketRef.current.emit("quiz:exit", { userId: user.userId, quizId: quizId });
+        }
     };
 
     const handlePopState = () => {
-        // Optionally send websocket event here before preventing back navigation
-        socket.emit("quiz:exit", { userId: user.userId, quizId: quizId });
+        if (socketRef.current) {
+            socketRef.current.emit("quiz:exit", { userId: user.userId, quizId: quizId });
+        }
         window.history.pushState(null, "", window.location.href);
     };
+
     useEffect(() => {
         window.addEventListener("beforeunload", handleBeforeUnload);
         window.history.pushState(null, "", window.location.href);
@@ -79,31 +120,64 @@ const QuizePage = () => {
         };
     }, []);
 
-    // Fetch quiz data
+
+    const goToNextQuestion = useCallback(() => {
+        if (!quizData) return;
+
+        if (currentQuestionIndex < quizData.questions.length - 1) {
+            setCurrentQuestionIndex(prev => prev + 1);
+        } else {
+            // Quiz completed
+            if (timerRef.current) {
+                clearInterval(timerRef.current);
+            }
+        }
+    }, [currentQuestionIndex, quizData]);
+
+    // Initialize socket, fetch quiz data, and REJOIN the room
     useEffect(() => {
         socketRef.current = getSocket();
-        const fetchQuizData = async () => {
-            if (!quizId) {
-                setError('Quiz ID is required');
-                setLoading(false);
-                return;
-            }
 
+        if (!socketRef.current || !quizId || !user?.userId) {
+            console.error('Missing socket, quizId, or userId.');
+            setLoading(false);
+            setError('Missing required information to load quiz.');
+            return;
+        }
+
+        console.log('=== QUIZ PAGE MOUNTED ===');
+        console.log('Socket ID:', socketRef.current.id);
+        console.log('Quiz ID:', quizId);
+        console.log('User:', user?.username);
+
+        // --- FIX: RELIABLE ROOM REJOIN ON MOUNT ---
+        if (isMultiplayer) {
+            console.log('Multiplayer mode. Emitting quiz:rejoin to ensure room membership...');
+
+            // This ensures the current active socket is added to the room
+            socketRef.current.emit('quiz:rejoin', {
+                quizId,
+                participantId: user.userId,
+            });
+        }
+        // ------------------------------------------
+
+        const fetchQuizData = async () => {
             try {
                 setLoading(true);
-                const response = await fetch(`http://localhost:8080/quiz/getQuiz/${quizId}`);
+                const response = await fetch(`http://localhost:8080/quiz/getQuizByCode/${quizId}`);
 
                 if (!response.ok) {
                     throw new Error('Failed to fetch quiz data');
                 }
 
                 const data = await response.json();
-                console.log('Quiz data fetched:', data);
+                console.log('✓ Quiz data fetched:', data);
 
                 setQuizData(data.quizDetails);
                 setError(null);
             } catch (err) {
-                console.error('Error fetching quiz:', err);
+                console.error('❌ Error fetching quiz:', err);
                 setError('Failed to load quiz. Please try again.');
             } finally {
                 setLoading(false);
@@ -111,10 +185,11 @@ const QuizePage = () => {
         };
 
         fetchQuizData();
-    }, [quizId]);
 
-    const currentQuestion = quizData?.questions[currentQuestionIndex];
-    const totalQuestions = quizData?.questions.length || 0;
+        // Clean up sessionStorage key if it exists, as the user is actively here
+        // sessionStorage.removeItem(`quiz_${quizId}_joined`);
+
+    }, [quizId, user?.userId, isMultiplayer]);
 
     // Listen for answer validation from server
     useEffect(() => {
@@ -157,7 +232,77 @@ const QuizePage = () => {
         return () => {
             socketRef.current?.off('quiz:isCorrect', handleAnswerResult);
         };
-    }, [currentQuestion, selectedAnswer]);
+    }, [currentQuestion, selectedAnswer, goToNextQuestion]); // Added goToNextQuestion dependency
+
+    // Listen for messages and rejoin confirmation
+    useEffect(() => {
+        if (!socketRef.current) return;
+
+        const handleMessageReceived = (data: {
+            quizId: string;
+            senderId: string;
+            username: string;
+            text: string;
+            messageType: string;
+            timestamp: number;
+        }) => {
+            console.log('📨 Message received via socket:', data);
+
+            setMessages(prev => [...prev, {
+                text: data.text,
+                timeStamp: data.timestamp,
+                // Note: isUser is true if the SENDER ID is the current user ID
+                isUser: data.senderId === user.userId,
+                username: data.username,
+                senderId: data.senderId,
+            }]);
+        };
+
+        const handleRoomInfo = (data: any) => {
+            console.log('=== DEBUG ROOM INFO RECEIVED ===');
+            console.log(data);
+        };
+
+        const handleRejoined = (data: any) => {
+            console.log('✓ Successfully rejoined quiz room:', data);
+        };
+
+        socketRef.current.on('message:received', handleMessageReceived);
+        socketRef.current.on('debug:room_info', handleRoomInfo);
+        socketRef.current.on('quiz:rejoined', handleRejoined);
+
+        return () => {
+            socketRef.current?.off('message:received', handleMessageReceived);
+            socketRef.current?.off('debug:room_info', handleRoomInfo);
+            socketRef.current?.off('quiz:rejoined', handleRejoined);
+        };
+    }, [user?.userId]);
+
+    // Debug: Check room status periodically
+    useEffect(() => {
+        if (!socketRef.current || !quizId) return;
+
+        const checkRoomStatus = () => {
+            // Request room debug info from server
+            socketRef.current?.emit('debug:check_rooms', { quizId });
+        };
+
+        // Check immediately
+        // Note: The first check will run before fetchQuizData completes, 
+        // subsequent checks are more reliable.
+        checkRoomStatus();
+
+        // Check after 2 seconds
+        const timer = setTimeout(checkRoomStatus, 2000);
+        // Check every 10 seconds (optional)
+        // const interval = setInterval(checkRoomStatus, 10000);
+
+        return () => {
+            clearTimeout(timer);
+            // clearInterval(interval);
+        };
+    }, [quizId]);
+
 
     const startTimer = useCallback(() => {
         setTimeLeft(10);
@@ -185,24 +330,33 @@ const QuizePage = () => {
 
     const handleTimeOut = () => {
         if (!answered && currentQuestion) {
+            // --- FIX 1: Clear the interval when timeout occurs ---
+            if (timerRef.current) {
+                clearInterval(timerRef.current);
+                timerRef.current = null; // Clear ref after clearing interval
+            }
+            // ----------------------------------------------------
+
             const timeSpent = Math.floor((Date.now() - startTimeRef.current) / 1000);
 
             // Send timeout to server to get correct answer
-            socket.emit('quiz:timeout', {
-                quizId: quizId,
-                participantId: user.userId,
-                questionId: currentQuestion._id,
-                timeSpent: timeSpent,
-            });
+            if (socketRef.current) {
+                socketRef.current.emit('quiz:timeout', {
+                    quizId: quizId,
+                    participantId: user.userId,
+                    questionId: currentQuestion._id,
+                    timeSpent: timeSpent,
+                });
+            }
 
             setAnswered(true);
 
-            // We'll get the correct answer from server, but record "No answer" for now
+            // Record "No answer"
             setUserAnswers(prev => [...prev, {
                 id: currentQuestion._id,
                 question: currentQuestion.questionText,
                 selectedAnswer: 'No answer',
-                correctAnswer: '',
+                correctAnswer: 'Server Validation Needed', // Placeholder
                 isCorrect: false,
                 timeSpent,
             }]);
@@ -212,20 +366,6 @@ const QuizePage = () => {
             }, 1500);
         }
     };
-
-    const goToNextQuestion = useCallback(() => {
-        if (!quizData) return;
-
-        if (currentQuestionIndex < quizData.questions.length - 1) {
-            setCurrentQuestionIndex(currentQuestionIndex + 1);
-        } else {
-            // Quiz completed
-            if (timerRef.current) {
-                clearInterval(timerRef.current);
-            }
-        }
-    }, [currentQuestionIndex, quizData]);
-
     useEffect(() => {
         if (!loading && quizData) {
             startTimer();
@@ -246,13 +386,15 @@ const QuizePage = () => {
         const timeSpent = Math.floor((Date.now() - startTimeRef.current) / 1000);
 
         // Send answer to server for validation
-        socket.emit('quiz:answer', {
-            quizId: quizId,
-            participantId: user.userId,
-            questionId: currentQuestion._id,
-            answer: option,
-            timeSpent: timeSpent,
-        });
+        if (socketRef.current) {
+            socketRef.current.emit('quiz:answer', {
+                quizId: quizId,
+                participantId: user.userId,
+                questionId: currentQuestion._id,
+                answer: option,
+                timeSpent: timeSpent,
+            });
+        }
 
         if (timerRef.current) {
             clearInterval(timerRef.current);
@@ -312,8 +454,8 @@ const QuizePage = () => {
     const progress = ((currentQuestionIndex + 1) / totalQuestions) * 100;
     const isQuizCompleted = currentQuestionIndex === totalQuestions - 1 && answered;
 
-    if (isQuizCompleted) {
-        socket?.emit("quiz:finishedForOne", { data: userAnswers });
+    if (isQuizCompleted && socketRef.current) {
+        socketRef.current.emit("quiz:finishedForOne", { data: userAnswers });
     }
 
     return (
@@ -487,8 +629,15 @@ const QuizePage = () => {
                         </div>
                     )}
                 </div>
-                <div className="h-[300px] w-[200px]">
-                    Chat with your opponent
+
+                {/* Chat Section */}
+                <div className="flex flex-col w-[40%] h-[calc(100vh-200px)] border border-gray-300 rounded-lg bg-white shadow-sm">
+                    <div className="bg-gray-50 px-4 py-3 border-b border-gray-200 rounded-t-lg">
+                        <h3 className="font-semibold text-gray-900">Quiz Chat</h3>
+                        <p className="text-xs text-gray-600">Talk with other participants</p>
+                    </div>
+                    <MessageList messages={messages} />
+                    <MessageComposer onSend={addMessage} quizId={quizData.inviteCode} />
                 </div>
             </main>
         </div>

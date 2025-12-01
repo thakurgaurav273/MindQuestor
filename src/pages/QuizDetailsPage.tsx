@@ -16,7 +16,7 @@ const QuizDetailsPage = () => {
 
   const fetchQuizDetails = async () => {
     try {
-      const response = await fetch(`http://localhost:8080/quiz/getQuiz/${quizId}`);
+      const response = await fetch(`http://localhost:8080/quiz/getQuizByCode/${quizId}`);
       const data = await response.json();
       setQuizDetails(data.quizDetails);
     } catch (error) {
